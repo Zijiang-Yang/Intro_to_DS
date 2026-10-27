@@ -1,0 +1,502 @@
+---
+title: "SDS 313 Introduction to Data Science"
+subtitle: "Code Demo 1: Have fun with a model"
+format: html
+editor: visual
+execute:
+  echo: true
+  warning: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Install the package if you haven't already 
+# install.packages("tidyverse")
+# If already installed, R will simply download the package again, overwrite the existing files, and effectively reinstall or update it.
+
+
+# Load libraries
+library(tidyverse)
+```
+
+------------------------------------------------------------------------
+
+# The Data Science Pipeline
+
+This demo is a toy example of the workflow you will learn and practice in this class:
+
+$$\text{Question} \longrightarrow \text{Data} \longrightarrow \text{Answer} \longrightarrow \text{More Questions} \longrightarrow \dots$$\$\$\\text{Question} \\longrightarrow \\text{Data} \\longrightarrow \\text{Answer} \\longrightarrow \\text{More Questions} \\longrightarrow \\dots\$\$
+
+<br>
+
+## Question: Can we predict gender by first name?
+
+How can we answer this question?
+
+<br>
+
+## Ideas & Considerations:
+
+1.  What do we mean by gender/sex in data?
+2.  Can we use a person's first name to predict their sex?
+3.  How would we build a model to predict sex given a first name?
+4.  Where can we obtain data for such a model?
+
+------------------------------------------------------------------------
+
+# US Social Security Data
+
+Public dataset containing baby names and registered **biological sex**.
+
+## Understanding the Context
+
+In this course, you will search for interesting datasets to work with and learn about different data sources on your own. **It is super important to read data documentation!**
+
+Reading from the [Social Security Administration (SSA) Background Description](https://www.ssa.gov/oact/babynames/background.html):
+
+> *"All names are from Social Security card applications for births that occurred in the United States after 1879. Note that many people born before 1937 never applied for a Social Security card, so their names are not included in our data. For others who did apply, our records may not show the place of birth, and again their names are not included in our data."*
+>
+> *"The data we are using below are from a 100% sample of the records on Social Security card applications as of end of year when the database was last updated."*
+
+------------------------------------------------------------------------
+
+## Get Data Programmatically
+
+This automated pipeline downloads the zip file directly from `ssa.gov`, unzips it, and consolidates all single-year data files into one master data table (tibble). Because the SSA updates this database annually, running this code will automatically fetch the most recent data each year.
+
+```{r}
+#| label: download-data
+
+# Download zip file directly from SSA if it doesn't already exist locally
+data_url  <- "https://www.ssa.gov/oact/babynames/names.zip"
+local_zip <- "names.zip"
+
+if (!file.exists(local_zip)) {
+  download.file(data_url, destfile = local_zip, mode = "wb")
+}
+
+# Unzip all contents into a temporary directory
+temp_dir <- tempfile()
+dir.create(temp_dir)
+unzip(local_zip, exdir = temp_dir)
+
+# Identify all single-year .txt files
+txt_files <- list.files(temp_dir, pattern = "^yob.*\\.txt$", full.names = TRUE)
+
+# Read each year's file and combine into a single tibble
+babynames_list <- lapply(txt_files, function(file_path) {
+  # Extract year from filename (e.g., "yob1880.txt" -> 1880)
+  year_val <- as.numeric(gsub("[^0-9]", "", basename(file_path)))
+
+  df <- read.csv(
+    file_path,
+    header = FALSE,
+    col.names = c("Name", "Sex", "Count"),
+    stringsAsFactors = FALSE
+  )
+  df$Year <- year_val
+  return(df)
+})
+
+# Bind into a single tibble
+babynames <- bind_rows(babynames_list) |>
+  as_tibble()
+
+# Display our master dataset
+babynames
+
+```
+
+------------------------------------------------------------------------
+
+## Data Cleaning & Exploration
+
+This data is already very clean, requiring minimal initial wrangling.
+
+```{r}
+#| label: convert-lowercase
+
+# Convert all names to lowercase for consistency
+babynames <- babynames |> 
+  mutate(Name = str_to_lower(Name))
+
+babynames
+```
+
+```{r}
+#| label: check-dimensions
+
+# Return total rows and columns
+dim(babynames)
+```
+
+Make sure you understand the structure of the `babynames` data: What are the rows and the columns? What do we mean by "tidy" data?
+
+```{r}
+#| label: filter-name-lookup
+
+# Look up all records for a specific name
+# Fill in your name or any name you would like to look up
+# Replace the ... with a name in quotes
+babynames |> 
+  filter(Name == "jenna")
+```
+
+```{r}
+#| label: filter-name-year
+
+# Filter records for a specific name AND birth year
+babynames |> 
+  filter(Name == "jenna", Year == 2002)
+```
+
+```{r}
+#| label: plot-single-name
+
+# Pick a name and sex (M or F) to plot popularity over time
+target_name <- "jenna"
+target_sex  <- "F"
+
+babynames |> 
+  filter(Name == target_name, Sex == target_sex) |> 
+  ggplot(aes(x = Year, y = Count)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = paste("Number of babies named", target_name, "(Sex:", target_sex, ")"),
+    x = "Year",
+    y = "Count"
+  )
+```
+
+------------------------------------------------------------------------
+
+# Summarizing Data
+
+### How many total babies were registered each year?
+
+We use `group_by()` and `summarize()` to aggregate data by group.
+
+```{r}
+#| label: count-babies-by-year
+
+# Summarize total counts by Year and Sex
+year_sex_counts <- babynames |> 
+  group_by(Year, Sex) |> 
+  summarize(TotalCount = sum(Count), .groups = "drop")
+
+year_sex_counts
+```
+
+```{r}
+#| label: plot-babies-by-year
+
+# Plot total baby registrations over time by Sex
+year_sex_counts |> 
+  ggplot(aes(x = Year, y = TotalCount, color = Sex)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Total Baby Registrations by Year and Sex",
+    x = "Year",
+    y = "Number of Babies"
+  )
+```
+
+### How many unique names were used each year?
+
+```{r}
+#| label: unique-names-by-year
+
+# Count distinct names per Year and Sex
+year_unique_names <- babynames |> 
+  group_by(Year, Sex) |> 
+  summarize(UniqueNames = n_distinct(Name), .groups = "drop")
+
+year_unique_names
+```
+
+```{r}
+#| label: plot-unique-names
+
+# Plot count of unique names over time
+year_unique_names |> 
+  ggplot(aes(x = Year, y = UniqueNames, color = Sex)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Number of Unique Baby Names by Year",
+    x = "Year",
+    y = "Count of Unique Names"
+  )
+```
+
+------------------------------------------------------------------------
+
+### Compute Proportion of Female Babies for Each Name
+
+```{r}
+#| label: proportion-female-per-name
+
+# Summarize total counts across all years for each name by sex
+sex_counts <- babynames |> 
+  group_by(Name, Sex) |> 
+  summarize(TotalCount = sum(Count), .groups = "drop") |> 
+  pivot_wider(names_from = Sex, values_from = TotalCount, values_fill = 0) |> 
+  mutate(
+    Total = F + M,
+    PropFemale = F / Total
+  )
+
+sex_counts
+```
+
+------------------------------------------------------------------------
+
+# Testing Specific Names
+
+```{r}
+#| label: test-own-name
+
+# Look up the female proportion for your own name
+sex_counts |> 
+  filter(Name == "jenna")
+```
+
+```{r}
+#| label: test-gender-neutral-name
+
+# Try a few names to see which are most gender-neutral (PropFemale close to 0.5)
+sex_counts |> 
+  filter(Name %in% c("pippa","becca","alex"))
+```
+
+```{r}
+#| label: plot-gender-neutral-trend
+
+gn_name <- "alex"
+
+babynames |> 
+  filter(Name == gn_name) |> 
+  ggplot(aes(x = Year, y = Count, color = Sex)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = paste("Popularity of gender-neutral name over time:", gn_name),
+    x = "Year",
+    y = "Count"
+  )
+```
+
+------------------------------------------------------------------------
+
+# Build a Simple Classifier (Model)
+
+We write a function that takes a first name and returns `"F"`, `"M"`, or `"Unknown"` based on historical data.
+
+```{r}
+#| label: classifier-function
+
+sex_from_name <- function(input_name, reference_df = sex_counts) {
+  clean_name <- str_to_lower(input_name)
+  match <- reference_df |> filter(Name == clean_name)
+  
+  if (nrow(match) == 0) {
+    return("Unknown")
+  } else if (match$PropFemale > 0.5) {
+    return("F")
+  } else {
+    return("M")
+  }
+}
+```
+
+```{r}
+#| label: test-classifier
+
+# Test a name using our classifier function
+sex_from_name("alex")
+```
+
+------------------------------------------------------------------------
+
+# Student Roster Analysis
+
+### What fraction of people in this class have names in the SSA Database?
+
+Let's load class roster data from Canvas/Registrar.
+
+```{r}
+#| label: load-roster
+
+# Load student roster CSV
+names_df <- read_csv("https://raw.githubusercontent.com/suchen1221/UTSDS_data_science_class/refs/heads/main/data/SDS313_names.csv", show_col_types = FALSE) |> 
+  mutate(
+    FirstName = str_to_lower(`FirstName`),
+  )
+
+cat("Number of people in class:", nrow(names_df), "\n")
+head(names_df)
+```
+
+```{r}
+#| label: compute-roster-overlap
+
+# Calculate the fraction of class first names present in SSA database
+in_database <- names_df$FirstName %in% sex_counts$Name
+cat("Fraction of names in the baby names data:", round(mean(in_database), 2), "\n")
+```
+
+### Which names are missing from the Database?
+
+Why might certain names not appear?
+
+```{r}
+#| label: identify-missing-names
+
+missing_names <- names_df |> 
+  filter(!FirstName %in% sex_counts$Name) |> 
+  pull(FirstName) |> 
+  unique()
+
+missing_names
+```
+
+------------------------------------------------------------------------
+
+# Predict Sex for the Class
+
+- **Input:** First Name
+- **Model:** `sex_from_name`
+- **Output:** Predicted Sex (`F`, `M`, or `Unknown`)
+
+```{r}
+#| label: apply-predictions
+
+names_df <- names_df |> 
+  mutate(PredictedSex = map_chr(FirstName, sex_from_name))
+
+names_df
+```
+
+### Estimate Proportion of Female Students
+
+```{r}
+#| label: estimate-female-proportion
+
+# Estimate fraction of female students (excluding 'Unknown' predictions)
+known_predictions <- names_df |> filter(PredictedSex != "Unknown")
+pred_prob_female   <- mean(known_predictions$PredictedSex == "F")
+
+pred_prob_female
+```
+
+------------------------------------------------------------------------
+
+# Using Simulation to Estimate Uncertainty
+
+Suppose `name1` has a female proportion of $0.50000001$ ($50.000001\%$) and `name2` has a female proportion of $0.49999999$ ($49.999999\%$). A deterministic $0.5$ threshold predicts `name1` as `F` and `name2` as `M`, despite virtually identical historical distributions!
+
+Instead of a hard threshold, we can simulate predictions probabilistically: assign `F` with probability $p$ (where $p = \text{PropFemale}$) and `M` with probability $1 - p$.
+
+```{r}
+#| label: extract-class-probabilities
+
+# Filter database to matches from our class roster
+class_probabilities <- sex_counts |> 
+  filter(Name %in% names_df$FirstName)
+
+class_probabilities
+```
+
+### Demonstrating Probabilistic Sampling
+
+```{r}
+#| label: single-sample-demo
+
+# Pick a single probability p and sample one result
+fp <- 0.5
+mp <- 1 - fp
+
+sample(c("F", "M"), size = 10, replace = TRUE, prob = c(fp, mp))
+```
+
+### Single Class Simulation
+
+```{r}
+#| label: class-simulation-single
+
+# Simulate predicted sex for each student once using a simple loop
+predict_sex <- c()
+
+for (i in 1:nrow(class_probabilities)) {
+  fp <- class_probabilities$PropFemale[i]
+  mp <- 1 - fp
+  
+  simulated_sex <- sample(c("F", "M"), size = 1, prob = c(fp, mp))
+  predict_sex   <- c(predict_sex, simulated_sex)
+}
+
+# Calculate predicted female proportion in class for this single simulation
+mean(predict_sex == "F")
+```
+
+### Running Monte Carlo Simulations ($10,000$ iterations)
+
+```{r}
+#| label: simulation-function
+
+# Function that performs one simulation pass over the class
+simulate_female_prop <- function(class_df) {
+  predict_sex <- c()
+  
+  for (i in 1:nrow(class_df)) {
+    fp <- class_df$PropFemale[i]
+    mp <- 1 - fp
+    simulated_sex <- sample(c("F", "M"), size = 1, prob = c(fp, mp))
+    predict_sex   <- c(predict_sex, simulated_sex)
+  }
+  
+  return(mean(predict_sex == "F"))
+}
+
+# Test function once
+simulate_female_prop(class_probabilities)
+```
+
+```{r}
+#| label: run-monte-carlo
+
+# Repeat simulation 10,000 times
+n_reps <- 10000
+simulations <- numeric(n_reps)
+
+set.seed(313) # For reproducibility
+
+for (n in 1:n_reps) {
+  simulations[n] <- simulate_female_prop(class_probabilities)
+}
+
+head(simulations)
+```
+
+```{r}
+#| label: plot-simulation-results
+
+# Visualize distribution of simulation results
+tibble(FemaleProp = simulations) |> 
+  ggplot(aes(x = FemaleProp)) +
+  geom_histogram(color = "white", binwidth = 0.02) +
+  labs(
+    title = "Estimated % of Female Students in SDS 313 (10,000 Simulations)",
+    x = "Simulated Proportion Female",
+    y = "Number of Simulations"
+  )
+```
+
+------------------------------------------------------------------------
+
+## Reflection Questions
+
+- Is this simple baseline model good enough?
+- How can you improve prediction accuracy without acquiring additional data?
+- What other questions can you ask about this baby names data?
+- What other data could help improve our model?
